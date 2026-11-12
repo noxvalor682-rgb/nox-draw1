@@ -107,7 +107,7 @@ input[type=range]{width:100%;padding:0;accent-color:var(--accent)}
 'use strict';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const canvas=$('#paint'),ctx=canvas.getContext('2d',{alpha:false,desynchronized:true});
-const socket=io({transports:['polling','websocket'],tryAllTransports:true,reconnection:true,reconnectionAttempts:Infinity,timeout:12000});
+const socket=io({transports:['polling','websocket'],reconnection:true,timeout:10000});
 let room='',me='',name='',members=[],tool='pen',color='#ffffff',brush=5,alpha=1,grid=true,bg='#10121d';
 let strokes=[],current=null,seq=0,view={x:innerWidth/2,y:innerHeight/2,k:1},dpr=Math.min(devicePixelRatio||1,1.5),dirty=true;
 let backgroundImage=null,backgroundData=null,pointers=new Map(),gesture=null,lastPan=null,pending=[],raf=0,textMode=false,voiceStream=null,voiceEnabled=false;
@@ -173,12 +173,20 @@ function updateMembers(list){members=list;$('#count').textContent=list.length;$(
 $('#peopleBtn').onclick=()=>toast('اعضای اتاق: '+members.map(x=>x.name).join('، '));
 $('#roomCode').onclick=async()=>{try{await navigator.clipboard.writeText(room);toast('کد اتاق کپی شد: '+room)}catch{toast('کد اتاق: '+room)}};
 function enterRoom(data){room=data.code;me=data.id;$('#codeLabel').textContent=room;$('#lobby').style.display='none';$('#connectionStatus').textContent='متصل شد';if(data.board){strokes=data.board.strokes||[];if(data.board.background)loadBackground(data.board.background);invalidate()}updateMembers(data.members||[]);toast('به اتاق وصل شدی')}
-$('#createRoom').onclick=()=>{name=$('#nickname').value.trim()||'نقاش';if(!socket.connected){toast('هنوز به سرور وصل نشدی؛ چند لحظه صبر کن');socket.connect();return}socket.emit('room:create',{name},(err)=>{if(err)toast('ساخت اتاق ناموفق بود؛ دوباره تلاش کن')})};
-$('#joinRoom').onclick=()=>{name=$('#nickname').value.trim()||'نقاش';const code=$('#joinCode').value.trim().toUpperCase();if(code.length<5)return toast('کد اتاق را کامل وارد کن');if(!socket.connected){toast('هنوز به سرور وصل نشدی؛ چند لحظه صبر کن');socket.connect();return}socket.emit('room:join',{name,code})};
+$('#createRoom').onclick=()=>{name=$('#nickname').value.trim()||'نقاش';socket.emit('room:create',{name})};
+$('#joinRoom').onclick=()=>{name=$('#nickname').value.trim()||'نقاش';const code=$('#joinCode').value.trim().toUpperCase();if(code.length<5)return toast('کد اتاق را کامل وارد کن');socket.emit('room:join',{name,code})};
 $('#leaveBtn').onclick=()=>{if(voiceStream)voiceStream.getTracks().forEach(t=>t.stop());socket.emit('room:leave',{room});location.reload()};
-socket.on('connect',()=>$('#connectionStatus').textContent='سرور آنلاین است؛ آماده ساخت اتاق');socket.on('connect_error',e=>{$('#connectionStatus').textContent='اتصال برقرار نشد؛ در حال تلاش دوباره...';console.warn('NOX DRAW connection error:',e.message)});socket.on('disconnect',reason=>{$('#connectionStatus').textContent='ارتباط قطع شد؛ در حال اتصال دوباره...';console.warn('NOX DRAW disconnected:',reason)});
+socket.on('connect',()=>$('#connectionStatus').textContent='سرور آنلاین است؛ آماده ساخت اتاق');socket.on('connect_error',()=>$('#connectionStatus').textContent='اتصال به سرور برقرار نشد؛ اینترنت را بررسی کن');
 socket.on('room:created',enterRoom);socket.on('room:joined',enterRoom);socket.on('room:error',m=>toast(m.message||'خطای اتاق'));
 socket.on('room:members',updateMembers);
 socket.on('draw:points',m=>{let s=strokes.find(x=>x.id===m.strokeId);if(!s){s={id:m.strokeId,kind:'stroke',tool:m.tool||'pen',color:m.color||'#fff',size:m.size||5,alpha:m.alpha??1,points:[],user:m.user};strokes.push(s)}s.points.push(...m.points);invalidate()});
 socket.on('draw:finish',m=>{const i=strokes.findIndex(x=>x.id===m.item.id);if(i>=0)strokes[i]=m.item;else strokes.push(m.item);invalidate()});
-socket.on('draw:text',m=>{strokes.push(m.item);invalid
+socket.on('draw:text',m=>{strokes.push(m.item);invalidate()});
+socket.on('draw:undo',m=>{strokes=strokes.filter(x=>x.id!==m.id);invalidate()});
+socket.on('draw:clear',()=>{strokes=[];invalidate()});
+socket.on('board:background',m=>loadBackground(m.data));
+socket.on('chat:message',addMessage);
+socket.on('room:state',m=>{strokes=m.strokes||[];loadBackground(m.background);invalidate()});
+
+// Voice: WebRTC peer mesh, suitable for small rooms. Audio only.
+async function startVoice(){if(voiceEnabled){stopVoice();return}try{voiceStream=await navigator.mediaDev
