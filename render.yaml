@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: nox-draw-amir-nagi
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
